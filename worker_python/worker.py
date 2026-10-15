@@ -103,6 +103,41 @@ BROWSER_KEY_MAP = {
     "F9": "f9", "F10": "f10", "F11": "f11", "F12": "f12",
 }
 
+def select_monitor(monitors):
+    monitor_count = len(monitors) - 1
+    if monitor_count < 1:
+        return 0, monitors[0]
+
+    configured_index = os.environ.get("WORKER_MONITOR", "").strip()
+    if configured_index:
+        try:
+            monitor_index = int(configured_index)
+        except ValueError:
+            logger.warning("Invalid WORKER_MONITOR value; using monitor 1.")
+            monitor_index = 1
+    elif sys.stdin.isatty():
+        print("Available screens:")
+        for monitor_index, monitor in enumerate(monitors[1:], start=1):
+            label = " (primary)" if monitor_index == 1 else ""
+            print(
+                f"  {monitor_index}: {monitor['width']}x{monitor['height']} "
+                f"at ({monitor['left']}, {monitor['top']}){label}"
+            )
+        try:
+            selection = input("Choose a screen to mirror [1]: ").strip()
+            monitor_index = int(selection) if selection else 1
+        except (EOFError, ValueError):
+            logger.warning("Invalid screen selection; using monitor 1.")
+            monitor_index = 1
+    else:
+        monitor_index = 1
+
+    if not 1 <= monitor_index <= monitor_count:
+        logger.warning("Monitor %d is unavailable; using monitor 1.", monitor_index)
+        monitor_index = 1
+
+    return monitor_index, monitors[monitor_index]
+
 class RemoteScreenWorker:
     def __init__(self, relay_url: str, auth_key: str = ""):
         self.relay_url = relay_url
@@ -110,27 +145,33 @@ class RemoteScreenWorker:
         self.target_fps = 25
         self.jpeg_quality = 65
         self.scale = 0.75  # 75% resolution scale for balanced bandwidth & latency
+        self.zoom_wheel_remainder = 0.0
         self.running = True
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
 
-    def execute_input_event(self, msg: dict, screen_w: int, screen_h: int):
+    def get_target_position(self, msg: dict, monitor: dict):
+        left = monitor["left"]
+        top = monitor["top"]
+        width = monitor["width"]
+        height = monitor["height"]
+        norm_x = msg.get("x", 0.5)
+        norm_y = msg.get("y", 0.5)
+        target_x = max(left, min(left + width - 1, left + int(norm_x * width)))
+        target_y = max(top, min(top + height - 1, top + int(norm_y * height)))
+        return target_x, target_y
+
+    def execute_input_event(self, msg: dict, monitor: dict):
         """Translates and triggers mouse/keyboard actions locally with Win32 API."""
         attach_thread_to_input_desktop()
         try:
             event_type = msg.get("type")
 
             if event_type == "mouse_move":
-                norm_x = msg.get("x", 0.5)
-                norm_y = msg.get("y", 0.5)
-                target_x = max(0, min(screen_w - 1, int(norm_x * screen_w)))
-                target_y = max(0, min(screen_h - 1, int(norm_y * screen_h)))
+                target_x, target_y = self.get_target_position(msg, monitor)
                 u32.SetCursorPos(target_x, target_y)
 
             elif event_type == "mouse_down":
-                norm_x = msg.get("x", 0.5)
-                norm_y = msg.get("y", 0.5)
-                target_x = max(0, min(screen_w - 1, int(norm_x * screen_w)))
-                target_y = max(0, min(screen_h - 1, int(norm_y * screen_h)))
+                target_x, target_y = self.get_target_position(msg, monitor)
                 btn = msg.get("button", "left")
                 u32.SetCursorPos(target_x, target_y)
                 if btn == "left":
@@ -142,10 +183,7 @@ class RemoteScreenWorker:
                 logger.info("[MOUSE DOWN] %s at (%d, %d)", btn, target_x, target_y)
 
             elif event_type == "mouse_up":
-                norm_x = msg.get("x", 0.5)
-                norm_y = msg.get("y", 0.5)
-                target_x = max(0, min(screen_w - 1, int(norm_x * screen_w)))
-                target_y = max(0, min(screen_h - 1, int(norm_y * screen_h)))
+                target_x, target_y = self.get_target_position(msg, monitor)
                 btn = msg.get("button", "left")
                 u32.SetCursorPos(target_x, target_y)
                 if btn == "left":
@@ -157,10 +195,7 @@ class RemoteScreenWorker:
                 logger.info("[MOUSE UP] %s at (%d, %d)", btn, target_x, target_y)
 
             elif event_type == "click":
-                norm_x = msg.get("x", 0.5)
-                norm_y = msg.get("y", 0.5)
-                target_x = max(0, min(screen_w - 1, int(norm_x * screen_w)))
-                target_y = max(0, min(screen_h - 1, int(norm_y * screen_h)))
+                target_x, target_y = self.get_target_position(msg, monitor)
                 btn = msg.get("button", "left")
                 u32.SetCursorPos(target_x, target_y)
                 flags_down = MOUSEEVENTF_LEFTDOWN if btn == "left" else MOUSEEVENTF_RIGHTDOWN if btn == "right" else MOUSEEVENTF_MIDDLEDOWN
@@ -171,10 +206,7 @@ class RemoteScreenWorker:
                 logger.info("[CLICK] %s at (%d, %d)", btn, target_x, target_y)
 
             elif event_type == "double_click":
-                norm_x = msg.get("x", 0.5)
-                norm_y = msg.get("y", 0.5)
-                target_x = max(0, min(screen_w - 1, int(norm_x * screen_w)))
-                target_y = max(0, min(screen_h - 1, int(norm_y * screen_h)))
+                target_x, target_y = self.get_target_position(msg, monitor)
                 u32.SetCursorPos(target_x, target_y)
                 for _ in range(2):
                     u32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
@@ -189,6 +221,19 @@ class RemoteScreenWorker:
                 clicks = -int(delta_y / 100 * 120) if delta_y != 0 else 0
                 if clicks != 0:
                     u32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, clicks, 0)
+
+            elif event_type == "zoom":
+                target_x, target_y = self.get_target_position(msg, monitor)
+                u32.SetCursorPos(target_x, target_y)
+                self.zoom_wheel_remainder += float(msg.get("delta", 0)) * 1.5
+                wheel_delta = int(self.zoom_wheel_remainder / 120) * 120
+                if wheel_delta:
+                    self.zoom_wheel_remainder -= wheel_delta
+                    pyautogui.keyDown("ctrl")
+                    try:
+                        u32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, wheel_delta, 0)
+                    finally:
+                        pyautogui.keyUp("ctrl")
 
             elif event_type == "key_down":
                 key_code = msg.get("code")
@@ -254,7 +299,7 @@ class RemoteScreenWorker:
         except Exception as e:
             logger.warning("Error processing input event %s: %s", msg.get("type"), e)
 
-    async def receiver_loop(self, ws, screen_w: int, screen_h: int):
+    async def receiver_loop(self, ws, monitor: dict):
         """Listens for remote control commands from Node relay."""
         try:
             async for raw_msg in ws:
@@ -269,7 +314,7 @@ class RemoteScreenWorker:
                             await ws.send(json.dumps({"type": "pong"}))
                         else:
                             loop = asyncio.get_running_loop()
-                            await loop.run_in_executor(None, self.execute_input_event, data, screen_w, screen_h)
+                            await loop.run_in_executor(None, self.execute_input_event, data, monitor)
                     except json.JSONDecodeError:
                         pass
         except websockets.exceptions.ConnectionClosed:
@@ -309,7 +354,15 @@ class RemoteScreenWorker:
 
                 if img is None:
                     try:
-                        img = ImageGrab.grab()
+                        img = ImageGrab.grab(
+                            bbox=(
+                                monitor["left"],
+                                monitor["top"],
+                                monitor["left"] + screen_w,
+                                monitor["top"] + screen_h,
+                            ),
+                            all_screens=True,
+                        )
                     except Exception as err:
                         logger.warning("Tela inacessivel temporariamente: %s", err)
                         time.sleep(0.4)
@@ -343,15 +396,16 @@ class RemoteScreenWorker:
         logger.info("Starting Remote Screen Worker...")
         logger.info("Relay Server URL: %s", self.relay_url)
 
-        # Detect primary monitor resolution
+        # Select the monitor to capture
         sct_instance = None
         monitor = {"left": 0, "top": 0, "width": 1920, "height": 1080}
+        monitor_index = 1
 
         if HAS_MSS:
             try:
                 sct_instance = MSS()
                 if len(sct_instance.monitors) > 1:
-                    monitor = sct_instance.monitors[1]
+                    monitor_index, monitor = select_monitor(sct_instance.monitors)
             except Exception as e:
                 logger.warning("Could not initialize MSS monitors: %s", e)
 
@@ -360,7 +414,14 @@ class RemoteScreenWorker:
             w, h = pyautogui.size()
             monitor = {"left": 0, "top": 0, "width": w, "height": h}
 
-        logger.info("Primary Screen Target: %dx%d", monitor["width"], monitor["height"])
+        logger.info(
+            "Screen target %d: %dx%d at (%d, %d)",
+            monitor_index,
+            monitor["width"],
+            monitor["height"],
+            monitor["left"],
+            monitor["top"],
+        )
 
         while self.running:
             try:
@@ -388,7 +449,7 @@ class RemoteScreenWorker:
                     logger.info(">>> CONNECTED! Transmitting screen and receiving inputs in real time. <<<")
 
                     stream_task = asyncio.create_task(self.capture_stream_loop(ws, sct_instance, monitor))
-                    receiver_task = asyncio.create_task(self.receiver_loop(ws, monitor["width"], monitor["height"]))
+                    receiver_task = asyncio.create_task(self.receiver_loop(ws, monitor))
 
                     done, pending = await asyncio.wait(
                         [stream_task, receiver_task],
