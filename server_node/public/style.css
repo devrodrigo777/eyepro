@@ -23,6 +23,10 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.hidden {
+  display: none !important;
+}
+
 body.touch-optimized {
   font-family: var(--font);
   background-color: var(--bg-dark);
