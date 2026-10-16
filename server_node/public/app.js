@@ -42,7 +42,6 @@
   // Virtual TV Keyboard Elements
   const virtualKeyboard = document.getElementById('virtualKeyboard');
   const toggleVirtualKbBtn = document.getElementById('toggleVirtualKbBtn');
-  const floatingKbTrigger = document.getElementById('floatingKbTrigger');
   const closeKbBtn = document.getElementById('closeKbBtn');
   const clearKbTextBtn = document.getElementById('clearKbTextBtn');
   const kbCapsLock = document.getElementById('kbCapsLock');
@@ -767,7 +766,6 @@
   }
 
   toggleVirtualKbBtn.addEventListener('click', toggleVirtualKeyboard);
-  floatingKbTrigger.addEventListener('click', toggleVirtualKeyboard);
   closeKbBtn.addEventListener('click', () => virtualKeyboard.classList.add('hidden'));
 
   // Size Preset Buttons

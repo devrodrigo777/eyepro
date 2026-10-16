@@ -428,18 +428,6 @@ body.touch-optimized {
   display: none !important;
 }
 
-.app-container.immersive-fullscreen .floating-kb-trigger {
-  opacity: 0.25;
-  transform: scale(0.8);
-  transition: opacity 0.3s, transform 0.3s;
-}
-
-.app-container.immersive-fullscreen .floating-kb-trigger:hover,
-.app-container.immersive-fullscreen .floating-kb-trigger:active {
-  opacity: 1;
-  transform: scale(1);
-}
-
 .app-container.immersive-fullscreen .viewport {
   width: 100vw;
   height: 100vh;
@@ -549,28 +537,6 @@ body.touch-optimized {
   gap: 10px;
 }
 
-/* Floating TV Keyboard Trigger */
-.floating-kb-trigger {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  background-color: var(--primary);
-  color: #fff;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  padding: 14px 22px;
-  border-radius: 30px;
-  font-size: 16px;
-  font-weight: 700;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
-  cursor: pointer;
-  z-index: 90;
-  transition: transform 0.2s, background-color 0.2s;
-}
-
-.floating-kb-trigger:active {
-  transform: scale(0.92);
-  background-color: var(--primary-hover);
-}
 
 /* ==================== TECLADO VIRTUAL FLUTUANTE ARRASTÁVEL ==================== */
 .virtual-keyboard-dock {
