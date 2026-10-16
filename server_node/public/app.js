@@ -473,7 +473,7 @@
         hasMoved: false
       });
 
-      // Se for exatamente 1 dedo, prepara long-press (600ms) para Botão Direito
+      // Se for exatamente 1 dedo, prepara long-press (500ms) para Duplo Clique
       if (canvasTouches.size === 1) {
         if (touchLongPressTimer) clearTimeout(touchLongPressTimer);
         const ptrId = e.pointerId;
@@ -484,15 +484,14 @@
             if (coords) {
               playTouchRipple(pt.startX, pt.startY);
               sendWorkerEvent({
-                type: 'click',
-                button: 'right',
+                type: 'double_click',
                 x: coords.x,
                 y: coords.y
               });
             }
-            pt.hasMoved = true; // Consumido para não gerar click ao soltar
+            pt.hasMoved = true; // Consumido para não gerar click simples ao soltar
           }
-        }, 600);
+        }, 500);
       } else {
         if (touchLongPressTimer) {
           clearTimeout(touchLongPressTimer);
