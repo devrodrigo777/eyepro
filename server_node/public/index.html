@@ -309,6 +309,8 @@
 
   </div>
 
-  <script src="app.js"></script>
+  <script>
+    document.write(`<script src="app.js?t=${Date.now()}"><\/script>`);
+  </script>
 </body>
 </html>

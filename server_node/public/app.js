@@ -273,6 +273,7 @@
       if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
+        canvas.style.aspectRatio = `${bitmap.width} / ${bitmap.height}`;
         updateDimensions(bitmap.width, bitmap.height);
       }
       ctx.drawImage(bitmap, 0, 0);
@@ -291,38 +292,11 @@
     }
   }
 
-  function updateCanvasDisplaySize() {
-    if (!remoteWidth || !remoteHeight) return;
-    const vpRect = viewport.getBoundingClientRect();
-    const vpWidth = vpRect.width;
-    const vpHeight = vpRect.height;
-    if (!vpWidth || !vpHeight) return;
-
-    const streamAspect = remoteWidth / remoteHeight;
-    const vpAspect = vpWidth / vpHeight;
-
-    let displayWidth, displayHeight;
-    if (vpAspect > streamAspect) {
-      // Viewport is wider than stream (black bars on left/right outside canvas)
-      displayHeight = vpHeight;
-      displayWidth = vpHeight * streamAspect;
-    } else {
-      // Viewport is taller than stream (black bars on top/bottom outside canvas)
-      displayWidth = vpWidth;
-      displayHeight = vpWidth / streamAspect;
-    }
-
-    canvas.style.width = `${Math.floor(displayWidth)}px`;
-    canvas.style.height = `${Math.floor(displayHeight)}px`;
-  }
-
-  window.addEventListener('resize', updateCanvasDisplaySize);
-
   function updateDimensions(w, h) {
     remoteWidth = w;
     remoteHeight = h;
     resolutionText.textContent = `${w} x ${h}`;
-    updateCanvasDisplaySize();
+    canvas.style.aspectRatio = `${w} / ${h}`;
   }
 
   function sendWorkerEvent(data) {
@@ -452,201 +426,238 @@
     setTimeout(() => touchRipple.classList.remove('active'), 400);
   }
 
-  let lastTouchTimestamp = 0;
+  // ==================== CONTROLE UNIFICADO VIA POINTER EVENTS (TOUCH & MOUSE) ====================
+  function getNormalizedCoordinates(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
 
-  // Touch Handlers for Smart TV & Touch Screens
-  canvas.addEventListener('touchstart', (e) => {
-    if (!isInteractive || e.touches.length === 0) return;
-    e.preventDefault(); // Prevents browser scroll/zoom and synthetic mouse events
-    lastTouchTimestamp = performance.now();
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
 
-    if (e.touches.length === 1) {
-      const touch = e.touches[0];
-      const coords = getNormalizedCoordinates(touch.clientX, touch.clientY);
+    if (mouseX < 0 || mouseX > rect.width || mouseY < 0 || mouseY > rect.height) {
+      return null;
+    }
+
+    return {
+      x: Math.max(0, Math.min(1, mouseX / rect.width)),
+      y: Math.max(0, Math.min(1, mouseY / rect.height))
+    };
+  }
+
+  function playTouchRipple(clientX, clientY) {
+    touchRipple.style.left = `${clientX}px`;
+    touchRipple.style.top = `${clientY}px`;
+    touchRipple.classList.remove('active');
+    void touchRipple.offsetWidth; // Force reflow
+    touchRipple.classList.add('active');
+    setTimeout(() => touchRipple.classList.remove('active'), 400);
+  }
+
+  // Active touch pointers on canvas
+  const canvasTouches = new Map();
+  let touchLongPressTimer = null;
+  let lastTouchEndTime = 0;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!isInteractive) return;
+
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      e.preventDefault();
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+
+      canvasTouches.set(e.pointerId, {
+        startX: e.clientX,
+        startY: e.clientY,
+        lastX: e.clientX,
+        lastY: e.clientY,
+        hasMoved: false
+      });
+
+      // Se for exatamente 1 dedo, prepara long-press (600ms) para Botão Direito
+      if (canvasTouches.size === 1) {
+        if (touchLongPressTimer) clearTimeout(touchLongPressTimer);
+        const ptrId = e.pointerId;
+        touchLongPressTimer = setTimeout(() => {
+          const pt = canvasTouches.get(ptrId);
+          if (pt && !pt.hasMoved && canvasTouches.size === 1) {
+            const coords = getNormalizedCoordinates(pt.startX, pt.startY);
+            if (coords) {
+              playTouchRipple(pt.startX, pt.startY);
+              sendWorkerEvent({
+                type: 'click',
+                button: 'right',
+                x: coords.x,
+                y: coords.y
+              });
+            }
+            pt.hasMoved = true; // Consumido para não gerar click ao soltar
+          }
+        }, 600);
+      } else {
+        if (touchLongPressTimer) {
+          clearTimeout(touchLongPressTimer);
+          touchLongPressTimer = null;
+        }
+      }
+      return;
+    }
+
+    // Mouse físico
+    if (e.pointerType === 'mouse') {
+      if (performance.now() - lastTouchEndTime < 800) return;
+      const coords = getNormalizedCoordinates(e.clientX, e.clientY);
       if (!coords) return;
 
-      touchStartData = {
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-        lastY: touch.clientY,
-        coords: coords,
-        hasMoved: false
-      };
-
-      // Long press (600ms) triggers native remote Right Click
-      longPressTimer = setTimeout(() => {
-        if (touchStartData && !touchStartData.hasMoved) {
-          playTouchRipple(touch.clientX, touch.clientY);
-          sendWorkerEvent({
-            type: 'click',
-            button: 'right',
-            x: touchStartData.coords.x,
-            y: touchStartData.coords.y
-          });
-          touchStartData = null; // Consume touch
-        }
-      }, 600);
-
-    } else if (e.touches.length === 2) {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-      touchStartData = null;
-      const [firstTouch, secondTouch] = e.touches;
-      twoFingerGesture = {
-        startY: (firstTouch.clientY + secondTouch.clientY) / 2,
-        lastY: (firstTouch.clientY + secondTouch.clientY) / 2,
-        startDistance: Math.hypot(firstTouch.clientX - secondTouch.clientX, firstTouch.clientY - secondTouch.clientY),
-        lastDistance: Math.hypot(firstTouch.clientX - secondTouch.clientX, firstTouch.clientY - secondTouch.clientY),
-        mode: null
-      };
+      const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
+      sendWorkerEvent({
+        type: 'mouse_down',
+        button: btn,
+        x: coords.x,
+        y: coords.y
+      });
     }
   }, { passive: false });
 
-  canvas.addEventListener('touchmove', (e) => {
+  canvas.addEventListener('pointermove', (e) => {
     if (!isInteractive) return;
-    e.preventDefault();
-    lastTouchTimestamp = performance.now();
 
-    if (e.touches.length === 1 && touchStartData) {
-      const touch = e.touches[0];
-      const totalDist = Math.hypot(touch.clientX - touchStartData.clientX, touch.clientY - touchStartData.clientY);
-      if (totalDist > 8) {
-        touchStartData.hasMoved = true;
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      e.preventDefault();
+      const pt = canvasTouches.get(e.pointerId);
+      if (!pt) return;
+
+      const dist = Math.hypot(e.clientX - pt.startX, e.clientY - pt.startY);
+      if (dist > 8) {
+        pt.hasMoved = true;
+        if (touchLongPressTimer) {
+          clearTimeout(touchLongPressTimer);
+          touchLongPressTimer = null;
         }
+      }
 
-        // Arrastar o dedo na tela -> Scrolla na direção do dedo (sem mousedown)
-        const stepY = touchStartData.lastY - touch.clientY;
-        if (Math.abs(stepY) >= 2) {
+      // 2 dedos: Pinça para zoom ou scroll com 2 dedos
+      if (canvasTouches.size === 2) {
+        const pts = Array.from(canvasTouches.values());
+        const p1 = pts[0];
+        const p2 = pts[1];
+        const currentDist = Math.hypot(
+          (p1 === pt ? e.clientX : p1.lastX) - (p2 === pt ? e.clientX : p2.lastX),
+          (p1 === pt ? e.clientY : p1.lastY) - (p2 === pt ? e.clientY : p2.lastY)
+        );
+        const lastDist = Math.hypot(p1.lastX - p2.lastX, p1.lastY - p2.lastY);
+        const diff = currentDist - lastDist;
+
+        if (Math.abs(diff) > 2) {
+          const centerX = ((p1 === pt ? e.clientX : p1.lastX) + (p2 === pt ? e.clientX : p2.lastX)) / 2;
+          const centerY = ((p1 === pt ? e.clientY : p1.lastY) + (p2 === pt ? e.clientY : p2.lastY)) / 2;
+          const coords = getNormalizedCoordinates(centerX, centerY);
+          if (coords) {
+            sendWorkerEvent({
+              type: 'zoom',
+              delta: diff,
+              x: coords.x,
+              y: coords.y
+            });
+          }
+        }
+      }
+      // 1 dedo arrastando: Scrolla na direção do dedo (NUNCA envia mouse_down ou move, portanto NÃO seleciona)
+      else if (canvasTouches.size === 1 && pt.hasMoved) {
+        const stepY = pt.lastY - e.clientY;
+        const stepX = pt.lastX - e.clientX;
+        if (Math.abs(stepY) >= 2 || Math.abs(stepX) >= 2) {
           sendWorkerEvent({
             type: 'scroll',
-            deltaY: stepY * 3.0
+            deltaX: stepX * 2.5,
+            deltaY: stepY * 2.5
           });
-          touchStartData.lastY = touch.clientY;
-        }
-      }
-    } else if (e.touches.length === 2 && twoFingerGesture) {
-      const [firstTouch, secondTouch] = e.touches;
-      const currentY = (firstTouch.clientY + secondTouch.clientY) / 2;
-      const currentDistance = Math.hypot(firstTouch.clientX - secondTouch.clientX, firstTouch.clientY - secondTouch.clientY);
-      const distanceChange = currentDistance - twoFingerGesture.lastDistance;
-
-      if (!twoFingerGesture.mode) {
-        if (Math.abs(currentDistance - twoFingerGesture.startDistance) > 8) {
-          twoFingerGesture.mode = 'zoom';
-        } else if (Math.abs(currentY - twoFingerGesture.startY) > 8) {
-          twoFingerGesture.mode = 'scroll';
         }
       }
 
-      if (twoFingerGesture.mode === 'zoom' && Math.abs(distanceChange) > 0.5) {
-        const centerX = (firstTouch.clientX + secondTouch.clientX) / 2;
-        const centerY = (firstTouch.clientY + secondTouch.clientY) / 2;
-        const coords = getNormalizedCoordinates(centerX, centerY);
+      pt.lastX = e.clientX;
+      pt.lastY = e.clientY;
+      return;
+    }
+
+    // Mouse físico
+    if (e.pointerType === 'mouse') {
+      if (performance.now() - lastTouchEndTime < 800) return;
+      const now = performance.now();
+      if (now - lastMouseMoveTime < MOUSE_THROTTLE_MS) return;
+      lastMouseMoveTime = now;
+
+      const coords = getNormalizedCoordinates(e.clientX, e.clientY);
+      if (!coords) return;
+
+      sendWorkerEvent({
+        type: 'mouse_move',
+        x: coords.x,
+        y: coords.y
+      });
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      e.preventDefault();
+      lastTouchEndTime = performance.now();
+      if (touchLongPressTimer) {
+        clearTimeout(touchLongPressTimer);
+        touchLongPressTimer = null;
+      }
+
+      const pt = canvasTouches.get(e.pointerId);
+      if (pt && !pt.hasMoved && canvasTouches.size === 1) {
+        // Toque simples -> Dispara SOMENTE o click! (Sem mouse_down nem mouse_up)
+        const coords = getNormalizedCoordinates(pt.startX, pt.startY);
         if (coords) {
+          playTouchRipple(pt.startX, pt.startY);
           sendWorkerEvent({
-            type: 'zoom',
-            delta: distanceChange,
+            type: 'click',
+            button: 'left',
             x: coords.x,
             y: coords.y
           });
         }
-      } else if (twoFingerGesture.mode === 'scroll') {
-        sendWorkerEvent({
-          type: 'scroll',
-          deltaY: (twoFingerGesture.lastY - currentY) * 2.5
-        });
       }
 
-      twoFingerGesture.lastY = currentY;
-      twoFingerGesture.lastDistance = currentDistance;
+      canvasTouches.delete(e.pointerId);
+      try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
+
+    // Mouse físico
+    if (e.pointerType === 'mouse') {
+      if (performance.now() - lastTouchEndTime < 800) return;
+      const coords = getNormalizedCoordinates(e.clientX, e.clientY);
+      if (!coords) return;
+
+      const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
+      sendWorkerEvent({
+        type: 'mouse_up',
+        button: btn,
+        x: coords.x,
+        y: coords.y
+      });
     }
   }, { passive: false });
 
-  canvas.addEventListener('touchend', (e) => {
-    lastTouchTimestamp = performance.now();
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
+  canvas.addEventListener('pointercancel', (e) => {
+    lastTouchEndTime = performance.now();
+    if (touchLongPressTimer) {
+      clearTimeout(touchLongPressTimer);
+      touchLongPressTimer = null;
     }
-
-    if (touchStartData && !touchStartData.hasMoved) {
-      // Toque simples -> Dispara SOMENTE o click
-      playTouchRipple(touchStartData.clientX, touchStartData.clientY);
-      sendWorkerEvent({
-        type: 'click',
-        button: 'left',
-        x: touchStartData.coords.x,
-        y: touchStartData.coords.y
-      });
-    }
-
-    touchStartData = null;
-    twoFingerGesture = null;
+    canvasTouches.delete(e.pointerId);
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
   });
 
-  canvas.addEventListener('touchcancel', () => {
-    lastTouchTimestamp = performance.now();
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-    touchStartData = null;
-    twoFingerGesture = null;
-  });
-
-  // Standard Mouse Handlers (Air mouse / Wireless mouse on Smart TV)
-  // Ignora completamente eventos emulados de mouse quando touch estiver em uso
-  canvas.addEventListener('mousemove', (e) => {
-    if (!isInteractive || performance.now() - lastTouchTimestamp < 1000) return;
-    const now = performance.now();
-    if (now - lastMouseMoveTime < MOUSE_THROTTLE_MS) return;
-    lastMouseMoveTime = now;
-
-    const coords = getNormalizedCoordinates(e.clientX, e.clientY);
-    if (!coords) return;
-
-    sendWorkerEvent({
-      type: 'mouse_move',
-      x: coords.x,
-      y: coords.y
-    });
-  });
-
-  canvas.addEventListener('mousedown', (e) => {
-    if (!isInteractive || performance.now() - lastTouchTimestamp < 1000) return;
-    const coords = getNormalizedCoordinates(e.clientX, e.clientY);
-    if (!coords) return;
-
-    const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
-    sendWorkerEvent({
-      type: 'mouse_down',
-      button: btn,
-      x: coords.x,
-      y: coords.y
-    });
-  });
-
-  canvas.addEventListener('mouseup', (e) => {
-    if (!isInteractive || performance.now() - lastTouchTimestamp < 1000) return;
-    const coords = getNormalizedCoordinates(e.clientX, e.clientY);
-    if (!coords) return;
-
-    const btn = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left';
-    sendWorkerEvent({
-      type: 'mouse_up',
-      button: btn,
-      x: coords.x,
-      y: coords.y
-    });
-  });
-
+  // Previne ações conflitantes padrão do navegador no canvas
   canvas.addEventListener('contextmenu', e => e.preventDefault());
+  canvas.addEventListener('dragstart', e => e.preventDefault());
+  canvas.addEventListener('selectstart', e => e.preventDefault());
 
+  // Roda do mouse físico (Wheel Scroll)
   canvas.addEventListener('wheel', (e) => {
     if (!isInteractive) return;
     e.preventDefault();
@@ -924,7 +935,6 @@
     bottomSwipeZone.classList.remove('hidden');
     fullscreenExitDock.classList.add('hidden');
     document.documentElement.requestFullscreen().catch(() => {});
-    setTimeout(updateCanvasDisplaySize, 100);
   }
 
   function exitImmersiveFullscreen() {
@@ -936,7 +946,6 @@
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     }
-    setTimeout(updateCanvasDisplaySize, 100);
   }
 
   function showExitDock() {
@@ -966,40 +975,47 @@
     showExitDock();
   });
 
-  // --- Swipe Up Gesture Detection (Touch & Pointer) ---
+  // --- Swipe Up Gesture Detection (3-finger touch via Pointer Events) ---
+  const windowActiveTouches = new Map();
   let threeFingerStartY = null;
-  let threeFingerStartX = null;
 
-  window.addEventListener('touchstart', (e) => {
-    if (!isImmersive) return;
-    if (e.touches.length === 3) {
-      threeFingerStartY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
-      threeFingerStartX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
-    } else {
-      threeFingerStartY = null;
-      threeFingerStartX = null;
-    }
-  }, { passive: true });
-
-  window.addEventListener('touchmove', (e) => {
-    if (!isImmersive || threeFingerStartY === null) return;
-    if (e.touches.length === 3) {
-      const currentY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
-      const currentX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
-      const deltaY = threeFingerStartY - currentY;
-      const deltaX = Math.abs(threeFingerStartX - currentX);
-      if (deltaY > 60 && deltaY > deltaX) {
-        showExitDock();
-        threeFingerStartY = null; // Prevent repeated triggers
-        threeFingerStartX = null;
+  window.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') {
+      windowActiveTouches.set(e.pointerId, e.clientY);
+      if (windowActiveTouches.size === 3) {
+        let sum = 0;
+        for (const y of windowActiveTouches.values()) sum += y;
+        threeFingerStartY = sum / 3;
       }
     }
   }, { passive: true });
 
-  window.addEventListener('touchend', (e) => {
-    if (e.touches.length < 3) {
-      threeFingerStartY = null;
-      threeFingerStartX = null;
+  window.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch' && windowActiveTouches.has(e.pointerId)) {
+      windowActiveTouches.set(e.pointerId, e.clientY);
+      if (isImmersive && windowActiveTouches.size === 3 && threeFingerStartY !== null) {
+        let sum = 0;
+        for (const y of windowActiveTouches.values()) sum += y;
+        const currentAvgY = sum / 3;
+        if (threeFingerStartY - currentAvgY > 50) {
+          showExitDock();
+          threeFingerStartY = null;
+        }
+      }
+    }
+  }, { passive: true });
+
+  window.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'touch') {
+      windowActiveTouches.delete(e.pointerId);
+      if (windowActiveTouches.size < 3) threeFingerStartY = null;
+    }
+  }, { passive: true });
+
+  window.addEventListener('pointercancel', (e) => {
+    if (e.pointerType === 'touch') {
+      windowActiveTouches.delete(e.pointerId);
+      if (windowActiveTouches.size < 3) threeFingerStartY = null;
     }
   }, { passive: true });
 

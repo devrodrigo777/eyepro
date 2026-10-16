@@ -169,6 +169,7 @@ class RemoteScreenWorker:
         self.jpeg_quality = 82
         self.scale = 1.0  # Full resolution by default for best quality
         self.zoom_wheel_remainder = 0.0
+        self.scroll_wheel_remainder = 0.0
         self.running = True
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
 
@@ -228,10 +229,17 @@ class RemoteScreenWorker:
 
             elif event_type == "scroll":
                 target_x, target_y = self.get_target_position(msg, monitor)
-                delta_y = msg.get("deltaY", 0)
-                clicks = -int(delta_y / 100 * 120) if delta_y != 0 else 0
-                if clicks != 0:
-                    send_mouse_event(MOUSEEVENTF_WHEEL, target_x, target_y, clicks)
+                delta_y = float(msg.get("deltaY", 0))
+                if delta_y != 0:
+                    self.scroll_wheel_remainder -= (delta_y * 1.5)
+                    wheel_delta = int(self.scroll_wheel_remainder / 120) * 120
+                    if wheel_delta != 0:
+                        self.scroll_wheel_remainder -= wheel_delta
+                        send_mouse_event(MOUSEEVENTF_WHEEL, target_x, target_y, wheel_delta)
+                    elif abs(self.scroll_wheel_remainder) >= 50:
+                        step = 120 if self.scroll_wheel_remainder > 0 else -120
+                        self.scroll_wheel_remainder = 0.0
+                        send_mouse_event(MOUSEEVENTF_WHEEL, target_x, target_y, step)
 
             elif event_type == "zoom":
                 target_x, target_y = self.get_target_position(msg, monitor)
