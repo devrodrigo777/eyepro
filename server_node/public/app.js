@@ -546,7 +546,7 @@
         const lastDist = Math.hypot(p1.lastX - p2.lastX, p1.lastY - p2.lastY);
         const diff = currentDist - lastDist;
 
-        if (Math.abs(diff) > 2) {
+        if (Math.abs(diff) > 2.5) {
           const centerX = ((p1 === pt ? e.clientX : p1.lastX) + (p2 === pt ? e.clientX : p2.lastX)) / 2;
           const centerY = ((p1 === pt ? e.clientY : p1.lastY) + (p2 === pt ? e.clientY : p2.lastY)) / 2;
           const coords = getNormalizedCoordinates(centerX, centerY);
@@ -556,6 +556,17 @@
               delta: diff,
               x: coords.x,
               y: coords.y
+            });
+          }
+        } else {
+          // 2 dedos se movendo juntos: scroll vertical e horizontal
+          const stepY = pt.lastY - e.clientY;
+          const stepX = pt.lastX - e.clientX;
+          if (Math.abs(stepY) >= 2 || Math.abs(stepX) >= 2) {
+            sendWorkerEvent({
+              type: 'scroll',
+              deltaX: stepX * 2.0,
+              deltaY: stepY * 2.0
             });
           }
         }

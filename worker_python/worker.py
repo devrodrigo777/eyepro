@@ -34,6 +34,7 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_WHEEL = 0x0800
+MOUSEEVENTF_HWHEEL = 0x01000
 MOUSEEVENTF_ABSOLUTE = 0x8000
 
 _INPUT_DESK_HANDLE = None
@@ -170,6 +171,7 @@ class RemoteScreenWorker:
         self.scale = 1.0  # Full resolution by default for best quality
         self.zoom_wheel_remainder = 0.0
         self.scroll_wheel_remainder = 0.0
+        self.scroll_hwheel_remainder = 0.0
         self.running = True
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
 
@@ -230,6 +232,9 @@ class RemoteScreenWorker:
             elif event_type == "scroll":
                 target_x, target_y = self.get_target_position(msg, monitor)
                 delta_y = float(msg.get("deltaY", 0))
+                delta_x = float(msg.get("deltaX", 0))
+
+                # Vertical scroll
                 if delta_y != 0:
                     self.scroll_wheel_remainder -= (delta_y * 1.5)
                     wheel_delta = int(self.scroll_wheel_remainder / 120) * 120
@@ -240,6 +245,18 @@ class RemoteScreenWorker:
                         step = 120 if self.scroll_wheel_remainder > 0 else -120
                         self.scroll_wheel_remainder = 0.0
                         send_mouse_event(MOUSEEVENTF_WHEEL, target_x, target_y, step)
+
+                # Horizontal scroll (Tilt wheel)
+                if delta_x != 0:
+                    self.scroll_hwheel_remainder += (delta_x * 1.5)
+                    hwheel_delta = int(self.scroll_hwheel_remainder / 120) * 120
+                    if hwheel_delta != 0:
+                        self.scroll_hwheel_remainder -= hwheel_delta
+                        send_mouse_event(MOUSEEVENTF_HWHEEL, target_x, target_y, hwheel_delta)
+                    elif abs(self.scroll_hwheel_remainder) >= 50:
+                        step = 120 if self.scroll_hwheel_remainder > 0 else -120
+                        self.scroll_hwheel_remainder = 0.0
+                        send_mouse_event(MOUSEEVENTF_HWHEEL, target_x, target_y, step)
 
             elif event_type == "zoom":
                 target_x, target_y = self.get_target_position(msg, monitor)
