@@ -382,6 +382,10 @@ body.touch-optimized {
   position: relative;
   background-color: #03060a;
   overflow: hidden;
+  touch-action: none !important;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #screenCanvas {
@@ -389,6 +393,10 @@ body.touch-optimized {
   max-height: 100%;
   object-fit: contain;
   cursor: crosshair;
+  touch-action: none !important;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Touch Ripple on Canvas */

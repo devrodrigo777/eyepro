@@ -296,7 +296,8 @@ function handleWorkerConnection(ws, workerId, workerName) {
 
       // Encaminha frame para os viewers conectados a este worker
       for (const viewer of viewerSockets) {
-        if (viewer.readyState === WebSocket.OPEN && viewer.targetWorkerId === workerId) {
+        const wantsThisWorker = viewer.targetWorkerId === workerId || (!viewer.targetWorkerId && registeredWorkers.size === 1);
+        if (viewer.readyState === WebSocket.OPEN && wantsThisWorker) {
           viewer.send(data, { binary: true });
         }
       }
@@ -386,8 +387,12 @@ function handleViewerConnection(ws) {
     }
 
     // Encaminha eventos de entrada (mouse/teclado) diretamente para o worker selecionado
-    if (ws.targetWorkerId) {
-      const targetWorker = registeredWorkers.get(ws.targetWorkerId);
+    let targetWorkerId = ws.targetWorkerId;
+    if (!targetWorkerId && registeredWorkers.size === 1) {
+      targetWorkerId = registeredWorkers.keys().next().value;
+    }
+    if (targetWorkerId) {
+      const targetWorker = registeredWorkers.get(targetWorkerId);
       if (targetWorker && targetWorker.socket.readyState === WebSocket.OPEN) {
         if (!isBinary) {
           targetWorker.socket.send(data.toString('utf8'));

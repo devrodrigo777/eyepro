@@ -238,6 +238,11 @@
       availableWorkers = msg.workers || [];
       renderWorkersList(availableWorkers);
 
+      // Auto-select if only 1 worker is available and none selected yet
+      if (availableWorkers.length === 1 && availableWorkers[0].online && !selectedWorker) {
+        selectWorker(availableWorkers[0].id);
+      }
+
       // If active worker is no longer online, update badge
       if (selectedWorker) {
         const stillOnline = availableWorkers.some(w => w.id === selectedWorker.id);
@@ -419,9 +424,13 @@
     setTimeout(() => touchRipple.classList.remove('active'), 400);
   }
 
+  let lastTouchTimestamp = 0;
+
   // Touch Handlers for Smart TV & Touch Screens
   canvas.addEventListener('touchstart', (e) => {
     if (!isInteractive || e.touches.length === 0) return;
+    e.preventDefault(); // Prevents browser scroll/zoom and synthetic mouse events
+    lastTouchTimestamp = performance.now();
 
     if (e.touches.length === 1) {
       const touch = e.touches[0];
@@ -486,13 +495,17 @@
   canvas.addEventListener('touchmove', (e) => {
     if (!isInteractive) return;
     e.preventDefault();
+    lastTouchTimestamp = performance.now();
 
     if (e.touches.length === 1 && touchStartData) {
       const touch = e.touches[0];
       const dist = Math.hypot(touch.clientX - touchStartData.clientX, touch.clientY - touchStartData.clientY);
-      if (dist > 10) {
+      if (dist > 6) {
         touchStartData.moved = true;
-        if (longPressTimer) clearTimeout(longPressTimer);
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
         if (!touchStartData.dragging) {
           touchStartData.dragging = true;
           sendWorkerEvent({
@@ -556,7 +569,11 @@
   }, { passive: false });
 
   canvas.addEventListener('touchend', (e) => {
-    if (longPressTimer) clearTimeout(longPressTimer);
+    lastTouchTimestamp = performance.now();
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
 
     if (touchStartData && !touchStartData.moved) {
       // Single tap -> Left Click
@@ -568,15 +585,16 @@
         y: touchStartData.coords.y
       });
     } else if (touchStartData && touchStartData.dragging) {
-      const touch = e.changedTouches[0];
+      const touch = e.changedTouches && e.changedTouches[0];
       const coords = touch
         ? getNormalizedCoordinates(touch.clientX, touch.clientY)
         : touchStartData.lastCoords;
+      const finalCoords = coords || touchStartData.lastCoords;
       sendWorkerEvent({
         type: 'mouse_up',
         button: 'left',
-        x: coords ? coords.x : touchStartData.lastCoords.x,
-        y: coords ? coords.y : touchStartData.lastCoords.y
+        x: finalCoords.x,
+        y: finalCoords.y
       });
     }
 
@@ -585,7 +603,11 @@
   });
 
   canvas.addEventListener('touchcancel', () => {
-    if (longPressTimer) clearTimeout(longPressTimer);
+    lastTouchTimestamp = performance.now();
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
     if (touchStartData && touchStartData.dragging) {
       sendWorkerEvent({
         type: 'mouse_up',
@@ -599,8 +621,9 @@
   });
 
   // Standard Mouse Handlers (Air mouse / Wireless mouse on Smart TV)
+  // Ignore synthetic mouse events fired by touch browsers
   canvas.addEventListener('mousemove', (e) => {
-    if (!isInteractive) return;
+    if (!isInteractive || performance.now() - lastTouchTimestamp < 600) return;
     const now = performance.now();
     if (now - lastMouseMoveTime < MOUSE_THROTTLE_MS) return;
     lastMouseMoveTime = now;
@@ -616,7 +639,7 @@
   });
 
   canvas.addEventListener('mousedown', (e) => {
-    if (!isInteractive) return;
+    if (!isInteractive || performance.now() - lastTouchTimestamp < 600) return;
     const coords = getNormalizedCoordinates(e.clientX, e.clientY);
     if (!coords) return;
 
@@ -630,7 +653,7 @@
   });
 
   canvas.addEventListener('mouseup', (e) => {
-    if (!isInteractive) return;
+    if (!isInteractive || performance.now() - lastTouchTimestamp < 600) return;
     const coords = getNormalizedCoordinates(e.clientX, e.clientY);
     if (!coords) return;
 

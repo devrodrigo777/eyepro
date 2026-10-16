@@ -36,18 +36,41 @@ MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_ABSOLUTE = 0x8000
 
+_INPUT_DESK_HANDLE = None
+
 def attach_thread_to_input_desktop():
     """Attaches current thread to Windows interactive input desktop."""
+    global _INPUT_DESK_HANDLE
     try:
-        hdesk = u32.OpenInputDesktop(0, False, 0x01FF)
-        if hdesk:
-            u32.SetThreadDesktop(hdesk)
-            u32.CloseDesktop(hdesk)
+        if not _INPUT_DESK_HANDLE:
+            _INPUT_DESK_HANDLE = u32.OpenInputDesktop(0, False, 0x01FF)
+        if _INPUT_DESK_HANDLE:
+            u32.SetThreadDesktop(_INPUT_DESK_HANDLE)
     except Exception:
         pass
 
 # Ensure main thread is attached
 attach_thread_to_input_desktop()
+
+def send_mouse_event(flags: int, x: int, y: int, data: int = 0):
+    """Sends hardware mouse event with absolute coordinate mapping."""
+    attach_thread_to_input_desktop()
+    v_left = u32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
+    v_top = u32.GetSystemMetrics(77)    # SM_YVIRTUALSCREEN
+    v_width = u32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+    v_height = u32.GetSystemMetrics(79) # SM_CYVIRTUALSCREEN
+    if v_width <= 0 or v_height <= 0:
+        v_left = 0
+        v_top = 0
+        v_width = u32.GetSystemMetrics(0) or 1920
+        v_height = u32.GetSystemMetrics(1) or 1080
+
+    norm_x = int((x - v_left) * 65536 / v_width)
+    norm_y = int((y - v_top) * 65536 / v_height)
+
+    u32.SetCursorPos(x, y)
+    u32.mouse_event(flags | MOUSEEVENTF_ABSOLUTE, norm_x, norm_y, data, 0)
+
 
 try:
     from mss import MSS
@@ -168,70 +191,57 @@ class RemoteScreenWorker:
 
             if event_type == "mouse_move":
                 target_x, target_y = self.get_target_position(msg, monitor)
-                u32.SetCursorPos(target_x, target_y)
+                send_mouse_event(MOUSEEVENTF_MOVE, target_x, target_y)
 
             elif event_type == "mouse_down":
                 target_x, target_y = self.get_target_position(msg, monitor)
                 btn = msg.get("button", "left")
-                u32.SetCursorPos(target_x, target_y)
-                if btn == "left":
-                    u32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                elif btn == "right":
-                    u32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                elif btn == "middle":
-                    u32.mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0)
+                flag = MOUSEEVENTF_LEFTDOWN if btn == "left" else MOUSEEVENTF_RIGHTDOWN if btn == "right" else MOUSEEVENTF_MIDDLEDOWN
+                send_mouse_event(MOUSEEVENTF_MOVE | flag, target_x, target_y)
                 logger.info("[MOUSE DOWN] %s at (%d, %d)", btn, target_x, target_y)
 
             elif event_type == "mouse_up":
                 target_x, target_y = self.get_target_position(msg, monitor)
                 btn = msg.get("button", "left")
-                u32.SetCursorPos(target_x, target_y)
-                if btn == "left":
-                    u32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                elif btn == "right":
-                    u32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-                elif btn == "middle":
-                    u32.mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0)
+                flag = MOUSEEVENTF_LEFTUP if btn == "left" else MOUSEEVENTF_RIGHTUP if btn == "right" else MOUSEEVENTF_MIDDLEUP
+                send_mouse_event(MOUSEEVENTF_MOVE | flag, target_x, target_y)
                 logger.info("[MOUSE UP] %s at (%d, %d)", btn, target_x, target_y)
 
             elif event_type == "click":
                 target_x, target_y = self.get_target_position(msg, monitor)
                 btn = msg.get("button", "left")
-                u32.SetCursorPos(target_x, target_y)
-                flags_down = MOUSEEVENTF_LEFTDOWN if btn == "left" else MOUSEEVENTF_RIGHTDOWN if btn == "right" else MOUSEEVENTF_MIDDLEDOWN
-                flags_up = MOUSEEVENTF_LEFTUP if btn == "left" else MOUSEEVENTF_RIGHTUP if btn == "right" else MOUSEEVENTF_MIDDLEUP
-                u32.mouse_event(flags_down, 0, 0, 0, 0)
-                time.sleep(0.015)
-                u32.mouse_event(flags_up, 0, 0, 0, 0)
+                flag_down = MOUSEEVENTF_LEFTDOWN if btn == "left" else MOUSEEVENTF_RIGHTDOWN if btn == "right" else MOUSEEVENTF_MIDDLEDOWN
+                flag_up = MOUSEEVENTF_LEFTUP if btn == "left" else MOUSEEVENTF_RIGHTUP if btn == "right" else MOUSEEVENTF_MIDDLEUP
+                send_mouse_event(MOUSEEVENTF_MOVE | flag_down, target_x, target_y)
+                time.sleep(0.02)
+                send_mouse_event(MOUSEEVENTF_MOVE | flag_up, target_x, target_y)
                 logger.info("[CLICK] %s at (%d, %d)", btn, target_x, target_y)
 
             elif event_type == "double_click":
                 target_x, target_y = self.get_target_position(msg, monitor)
-                u32.SetCursorPos(target_x, target_y)
                 for _ in range(2):
-                    u32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                    time.sleep(0.01)
-                    u32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                    time.sleep(0.05)
+                    send_mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN, target_x, target_y)
+                    time.sleep(0.015)
+                    send_mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP, target_x, target_y)
+                    time.sleep(0.04)
                 logger.info("[DOUBLE CLICK] at (%d, %d)", target_x, target_y)
 
             elif event_type == "scroll":
+                target_x, target_y = self.get_target_position(msg, monitor)
                 delta_y = msg.get("deltaY", 0)
-                # Windows standard wheel notch is 120
                 clicks = -int(delta_y / 100 * 120) if delta_y != 0 else 0
                 if clicks != 0:
-                    u32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, clicks, 0)
+                    send_mouse_event(MOUSEEVENTF_WHEEL, target_x, target_y, clicks)
 
             elif event_type == "zoom":
                 target_x, target_y = self.get_target_position(msg, monitor)
-                u32.SetCursorPos(target_x, target_y)
                 self.zoom_wheel_remainder += float(msg.get("delta", 0)) * 1.5
                 wheel_delta = int(self.zoom_wheel_remainder / 120) * 120
                 if wheel_delta:
                     self.zoom_wheel_remainder -= wheel_delta
                     pyautogui.keyDown("ctrl")
                     try:
-                        u32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, wheel_delta, 0)
+                        send_mouse_event(MOUSEEVENTF_WHEEL, target_x, target_y, wheel_delta)
                     finally:
                         pyautogui.keyUp("ctrl")
 
