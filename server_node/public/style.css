@@ -389,14 +389,13 @@ body.touch-optimized {
 }
 
 #screenCanvas {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  display: block;
   cursor: crosshair;
   touch-action: none !important;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  /* Width and height are dynamically managed in JS to match exact stream aspect ratio without letterboxing */
 }
 
 /* Touch Ripple on Canvas */
@@ -443,11 +442,8 @@ body.touch-optimized {
 }
 
 .app-container.immersive-fullscreen #screenCanvas {
-  width: 100vw;
-  height: 100vh;
-  max-width: 100vw;
-  max-height: 100vh;
-  object-fit: contain;
+  display: block;
+  /* Width and height dynamically sized in JS to maintain true aspect ratio without internal black bars */
 }
 
 /* Bottom Swipe Zone */
@@ -565,18 +561,19 @@ body.touch-optimized {
   transform: translateX(-50%);
   width: 740px;
   max-width: 98vw;
-  min-width: 320px;
+  min-width: 280px;
   background-color: rgba(14, 20, 31, 0.97);
   backdrop-filter: blur(18px);
   border: 2px solid var(--primary);
   border-radius: 14px;
-  padding: 10px 12px 14px 12px;
+  padding: 8px 10px 12px 10px;
   z-index: 300;
   box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.7), 0 0 18px rgba(37, 99, 235, 0.2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  /* Size controlled via JS */
+  gap: var(--kb-gap, 5px);
+  box-sizing: border-box;
+  overflow: hidden;
   cursor: default;
 }
 
@@ -589,7 +586,7 @@ body.touch-optimized {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
   cursor: move;
   user-select: none;
@@ -597,7 +594,7 @@ body.touch-optimized {
 }
 
 .kb-drag-icon {
-  font-size: 18px;
+  font-size: 16px;
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -625,14 +622,14 @@ body.touch-optimized {
 /* Resize Grip */
 .kb-resize-grip {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 22px;
-  height: 22px;
+  right: 2px;
+  bottom: 2px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 14px;
   color: var(--text-muted);
   cursor: se-resize;
   touch-action: none;
@@ -649,16 +646,6 @@ body.touch-optimized {
 @keyframes slide-up {
   from { transform: translateX(-50%) translateY(30px); opacity: 0; }
   to { transform: translateX(-50%) translateY(0); opacity: 1; }
-}
-
-
-/* kb-header is legacy but kept for any outer reference */
-.kb-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
 }
 
 .kb-title {
@@ -679,32 +666,39 @@ body.touch-optimized {
 .kb-rows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--kb-gap, 5px);
+  width: 100%;
 }
 
 .kb-row {
   display: flex;
-  gap: 6px;
+  gap: var(--kb-gap, 5px);
   justify-content: center;
   width: 100%;
 }
 
 .kb-key {
   flex: 1;
-  min-height: 38px;
+  min-width: 0 !important;
+  min-height: var(--kb-key-height, 36px);
+  height: var(--kb-key-height, 36px);
   background-color: var(--bg-card);
   border: 1px solid var(--border);
   color: var(--text-main);
-  font-size: 13px;
+  font-size: var(--kb-font-size, 12px);
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: 5px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+  padding: 0 1px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   transition: transform 0.08s, background-color 0.08s;
-  min-width: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .kb-key:active {
@@ -717,7 +711,7 @@ body.touch-optimized {
 /* Functional Keys on TV Keyboard */
 .kb-func {
   background-color: #1e293b;
-  font-size: 11px;
+  font-size: calc(var(--kb-font-size, 12px) * 0.85);
   flex: 1.2;
 }
 
@@ -726,7 +720,7 @@ body.touch-optimized {
   border-color: rgba(239, 68, 68, 0.5);
   color: #fca5a5;
   flex: 1.5;
-  font-size: 12px;
+  font-size: calc(var(--kb-font-size, 12px) * 0.9);
 }
 
 .kb-enter {
@@ -734,14 +728,14 @@ body.touch-optimized {
   border-color: #10b981;
   color: #fff;
   flex: 1.8;
-  font-size: 12px;
+  font-size: calc(var(--kb-font-size, 12px) * 0.9);
   font-weight: 700;
 }
 
 .kb-space {
-  flex: 5;
+  flex: 4.5;
   background-color: #1e293b;
-  font-size: 11px;
+  font-size: calc(var(--kb-font-size, 12px) * 0.85);
   color: var(--text-muted);
 }
 
@@ -749,8 +743,8 @@ body.touch-optimized {
   background-color: #312e81;
   border-color: #4338ca;
   color: #c7d2fe;
-  flex: 1.4;
-  font-size: 11px;
+  flex: 1.3;
+  font-size: calc(var(--kb-font-size, 12px) * 0.85);
 }
 
 .kb-caps.active, .kb-shift.active {
@@ -761,22 +755,22 @@ body.touch-optimized {
 
 .kb-arrow {
   flex: 0.9;
-  font-size: 16px;
+  font-size: calc(var(--kb-font-size, 12px) * 1.1);
   background-color: #1e293b;
 }
 
 .kb-shortcut {
-  flex: 1.2;
+  flex: 1.1;
   background-color: #1e3a8a;
   border-color: #2563eb;
   color: #bfdbfe;
-  font-size: 13px;
+  font-size: calc(var(--kb-font-size, 12px) * 0.85);
 }
 
 .kb-special {
-  flex: 1.2;
+  flex: 1.1;
   background-color: #1e293b;
-  font-size: 14px;
+  font-size: calc(var(--kb-font-size, 12px) * 0.85);
 }
 
 /* ==================== MODAL DE SELEÇÃO DE WORKERS ==================== */

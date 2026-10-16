@@ -291,10 +291,38 @@
     }
   }
 
+  function updateCanvasDisplaySize() {
+    if (!remoteWidth || !remoteHeight) return;
+    const vpRect = viewport.getBoundingClientRect();
+    const vpWidth = vpRect.width;
+    const vpHeight = vpRect.height;
+    if (!vpWidth || !vpHeight) return;
+
+    const streamAspect = remoteWidth / remoteHeight;
+    const vpAspect = vpWidth / vpHeight;
+
+    let displayWidth, displayHeight;
+    if (vpAspect > streamAspect) {
+      // Viewport is wider than stream (black bars on left/right outside canvas)
+      displayHeight = vpHeight;
+      displayWidth = vpHeight * streamAspect;
+    } else {
+      // Viewport is taller than stream (black bars on top/bottom outside canvas)
+      displayWidth = vpWidth;
+      displayHeight = vpWidth / streamAspect;
+    }
+
+    canvas.style.width = `${Math.floor(displayWidth)}px`;
+    canvas.style.height = `${Math.floor(displayHeight)}px`;
+  }
+
+  window.addEventListener('resize', updateCanvasDisplaySize);
+
   function updateDimensions(w, h) {
     remoteWidth = w;
     remoteHeight = h;
     resolutionText.textContent = `${w} x ${h}`;
+    updateCanvasDisplaySize();
   }
 
   function sendWorkerEvent(data) {
@@ -440,45 +468,29 @@
       touchStartData = {
         clientX: touch.clientX,
         clientY: touch.clientY,
+        lastY: touch.clientY,
         coords: coords,
-        lastCoords: coords,
-        time: performance.now(),
-        moved: false,
-        dragging: false
+        hasMoved: false
       };
 
-      // Long press (450ms) triggers native remote Right Click!
+      // Long press (600ms) triggers native remote Right Click
       longPressTimer = setTimeout(() => {
-        if (touchStartData && !touchStartData.moved) {
+        if (touchStartData && !touchStartData.hasMoved) {
           playTouchRipple(touch.clientX, touch.clientY);
-          // Trigger Right Click
           sendWorkerEvent({
-            type: 'mouse_down',
+            type: 'click',
             button: 'right',
             x: touchStartData.coords.x,
             y: touchStartData.coords.y
           });
-          setTimeout(() => {
-            sendWorkerEvent({
-              type: 'mouse_up',
-              button: 'right',
-              x: touchStartData.coords.x,
-              y: touchStartData.coords.y
-            });
-          }, 30);
           touchStartData = null; // Consume touch
         }
-      }, 450);
+      }, 600);
 
     } else if (e.touches.length === 2) {
-      if (longPressTimer) clearTimeout(longPressTimer);
-      if (touchStartData && touchStartData.dragging) {
-        sendWorkerEvent({
-          type: 'mouse_up',
-          button: 'left',
-          x: touchStartData.lastCoords.x,
-          y: touchStartData.lastCoords.y
-        });
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
       }
       touchStartData = null;
       const [firstTouch, secondTouch] = e.touches;
@@ -499,35 +511,22 @@
 
     if (e.touches.length === 1 && touchStartData) {
       const touch = e.touches[0];
-      const dist = Math.hypot(touch.clientX - touchStartData.clientX, touch.clientY - touchStartData.clientY);
-      if (dist > 6) {
-        touchStartData.moved = true;
+      const totalDist = Math.hypot(touch.clientX - touchStartData.clientX, touch.clientY - touchStartData.clientY);
+      if (totalDist > 8) {
+        touchStartData.hasMoved = true;
         if (longPressTimer) {
           clearTimeout(longPressTimer);
           longPressTimer = null;
         }
-        if (!touchStartData.dragging) {
-          touchStartData.dragging = true;
-          sendWorkerEvent({
-            type: 'mouse_down',
-            button: 'left',
-            x: touchStartData.coords.x,
-            y: touchStartData.coords.y
-          });
-        }
-      }
 
-      const now = performance.now();
-      if (now - lastMouseMoveTime >= MOUSE_THROTTLE_MS) {
-        lastMouseMoveTime = now;
-        const coords = getNormalizedCoordinates(touch.clientX, touch.clientY);
-        if (coords) {
-          touchStartData.lastCoords = coords;
+        // Arrastar o dedo na tela -> Scrolla na direção do dedo (sem mousedown)
+        const stepY = touchStartData.lastY - touch.clientY;
+        if (Math.abs(stepY) >= 2) {
           sendWorkerEvent({
-            type: 'mouse_move',
-            x: coords.x,
-            y: coords.y
+            type: 'scroll',
+            deltaY: stepY * 3.0
           });
+          touchStartData.lastY = touch.clientY;
         }
       }
     } else if (e.touches.length === 2 && twoFingerGesture) {
@@ -537,9 +536,9 @@
       const distanceChange = currentDistance - twoFingerGesture.lastDistance;
 
       if (!twoFingerGesture.mode) {
-        if (Math.abs(currentDistance - twoFingerGesture.startDistance) > 6) {
+        if (Math.abs(currentDistance - twoFingerGesture.startDistance) > 8) {
           twoFingerGesture.mode = 'zoom';
-        } else if (Math.abs(currentY - twoFingerGesture.startY) > 6) {
+        } else if (Math.abs(currentY - twoFingerGesture.startY) > 8) {
           twoFingerGesture.mode = 'scroll';
         }
       }
@@ -575,26 +574,14 @@
       longPressTimer = null;
     }
 
-    if (touchStartData && !touchStartData.moved) {
-      // Single tap -> Left Click
+    if (touchStartData && !touchStartData.hasMoved) {
+      // Toque simples -> Dispara SOMENTE o click
       playTouchRipple(touchStartData.clientX, touchStartData.clientY);
       sendWorkerEvent({
         type: 'click',
         button: 'left',
         x: touchStartData.coords.x,
         y: touchStartData.coords.y
-      });
-    } else if (touchStartData && touchStartData.dragging) {
-      const touch = e.changedTouches && e.changedTouches[0];
-      const coords = touch
-        ? getNormalizedCoordinates(touch.clientX, touch.clientY)
-        : touchStartData.lastCoords;
-      const finalCoords = coords || touchStartData.lastCoords;
-      sendWorkerEvent({
-        type: 'mouse_up',
-        button: 'left',
-        x: finalCoords.x,
-        y: finalCoords.y
       });
     }
 
@@ -608,22 +595,14 @@
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
-    if (touchStartData && touchStartData.dragging) {
-      sendWorkerEvent({
-        type: 'mouse_up',
-        button: 'left',
-        x: touchStartData.lastCoords.x,
-        y: touchStartData.lastCoords.y
-      });
-    }
     touchStartData = null;
     twoFingerGesture = null;
   });
 
   // Standard Mouse Handlers (Air mouse / Wireless mouse on Smart TV)
-  // Ignore synthetic mouse events fired by touch browsers
+  // Ignora completamente eventos emulados de mouse quando touch estiver em uso
   canvas.addEventListener('mousemove', (e) => {
-    if (!isInteractive || performance.now() - lastTouchTimestamp < 600) return;
+    if (!isInteractive || performance.now() - lastTouchTimestamp < 1000) return;
     const now = performance.now();
     if (now - lastMouseMoveTime < MOUSE_THROTTLE_MS) return;
     lastMouseMoveTime = now;
@@ -639,7 +618,7 @@
   });
 
   canvas.addEventListener('mousedown', (e) => {
-    if (!isInteractive || performance.now() - lastTouchTimestamp < 600) return;
+    if (!isInteractive || performance.now() - lastTouchTimestamp < 1000) return;
     const coords = getNormalizedCoordinates(e.clientX, e.clientY);
     if (!coords) return;
 
@@ -653,7 +632,7 @@
   });
 
   canvas.addEventListener('mouseup', (e) => {
-    if (!isInteractive || performance.now() - lastTouchTimestamp < 600) return;
+    if (!isInteractive || performance.now() - lastTouchTimestamp < 1000) return;
     const coords = getNormalizedCoordinates(e.clientX, e.clientY);
     if (!coords) return;
 
@@ -739,9 +718,21 @@
     localStorage.setItem(KB_STORAGE_POS, JSON.stringify({ left: rect.left, top: rect.top }));
   }
 
+  function updateKeyboardScale(width) {
+    const baseWidth = 740;
+    const ratio = Math.max(0.45, Math.min(1.4, width / baseWidth));
+    const keyHeight = Math.round(38 * ratio);
+    const fontSize = Math.round(13 * ratio);
+    const gap = Math.max(2, Math.round(5 * ratio));
+    virtualKeyboard.style.setProperty('--kb-key-height', `${keyHeight}px`);
+    virtualKeyboard.style.setProperty('--kb-font-size', `${fontSize}px`);
+    virtualKeyboard.style.setProperty('--kb-gap', `${gap}px`);
+  }
+
   function applyKbSizePreset(sizeKey, saveToStorage = true) {
     const preset = KB_SIZE_PRESETS[sizeKey] || KB_SIZE_PRESETS.large;
     virtualKeyboard.style.width = preset.width + 'px';
+    updateKeyboardScale(preset.width);
     // Mark active preset button
     document.querySelectorAll('.kb-size-btn').forEach(btn => {
       btn.classList.toggle('active', btn.getAttribute('data-size') === sizeKey);
@@ -829,8 +820,9 @@
     if (!kbResizeState) return;
     e.preventDefault();
     const dx = e.clientX - kbResizeState.startX;
-    const newWidth = Math.max(320, Math.min(window.innerWidth * 0.98, kbResizeState.origWidth + dx));
+    const newWidth = Math.max(280, Math.min(window.innerWidth * 0.98, kbResizeState.origWidth + dx));
     virtualKeyboard.style.width = newWidth + 'px';
+    updateKeyboardScale(newWidth);
     // Deactivate all size preset buttons since we're using custom size
     document.querySelectorAll('.kb-size-btn').forEach(btn => btn.classList.remove('active'));
   });
@@ -932,6 +924,7 @@
     bottomSwipeZone.classList.remove('hidden');
     fullscreenExitDock.classList.add('hidden');
     document.documentElement.requestFullscreen().catch(() => {});
+    setTimeout(updateCanvasDisplaySize, 100);
   }
 
   function exitImmersiveFullscreen() {
@@ -943,6 +936,7 @@
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     }
+    setTimeout(updateCanvasDisplaySize, 100);
   }
 
   function showExitDock() {
@@ -973,25 +967,39 @@
   });
 
   // --- Swipe Up Gesture Detection (Touch & Pointer) ---
-  let swipeStartY = 0;
-  let swipeStartX = 0;
+  let threeFingerStartY = null;
+  let threeFingerStartX = null;
 
   window.addEventListener('touchstart', (e) => {
-    if (!isImmersive || e.touches.length === 0) return;
-    swipeStartY = e.touches[0].clientY;
-    swipeStartX = e.touches[0].clientX;
+    if (!isImmersive) return;
+    if (e.touches.length === 3) {
+      threeFingerStartY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
+      threeFingerStartX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
+    } else {
+      threeFingerStartY = null;
+      threeFingerStartX = null;
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchmove', (e) => {
+    if (!isImmersive || threeFingerStartY === null) return;
+    if (e.touches.length === 3) {
+      const currentY = (e.touches[0].clientY + e.touches[1].clientY + e.touches[2].clientY) / 3;
+      const currentX = (e.touches[0].clientX + e.touches[1].clientX + e.touches[2].clientX) / 3;
+      const deltaY = threeFingerStartY - currentY;
+      const deltaX = Math.abs(threeFingerStartX - currentX);
+      if (deltaY > 60 && deltaY > deltaX) {
+        showExitDock();
+        threeFingerStartY = null; // Prevent repeated triggers
+        threeFingerStartX = null;
+      }
+    }
   }, { passive: true });
 
   window.addEventListener('touchend', (e) => {
-    if (!isImmersive || !e.changedTouches || e.changedTouches.length === 0) return;
-    const endY = e.changedTouches[0].clientY;
-    const endX = e.changedTouches[0].clientX;
-    const deltaY = swipeStartY - endY;
-    const deltaX = Math.abs(swipeStartX - endX);
-
-    // If dragged UP by 50px or more (and more vertical than horizontal)
-    if (deltaY > 50 && deltaY > deltaX) {
-      showExitDock();
+    if (e.touches.length < 3) {
+      threeFingerStartY = null;
+      threeFingerStartX = null;
     }
   }, { passive: true });
 
