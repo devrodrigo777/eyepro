@@ -716,26 +716,56 @@
     large:  { width: 760 }
   };
   const KB_STORAGE_POS = 'eyepro_kb_pos';
+  const KB_STORAGE_WIDTH = 'eyepro_kb_width';
   const KB_STORAGE_SIZE = 'eyepro_kb_size';
 
-  // Restore last position from localStorage
-  function restoreKbPosition() {
+  function saveKbState() {
+    const rect = virtualKeyboard.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      localStorage.setItem(KB_STORAGE_POS, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
+      localStorage.setItem(KB_STORAGE_WIDTH, Math.round(rect.width).toString());
+    }
+  }
+
+  // Restore last position and size from localStorage
+  function restoreKbState() {
     try {
+      // 1. Restaurar Largura / Tamanho
+      const savedWidth = parseFloat(localStorage.getItem(KB_STORAGE_WIDTH));
+      const savedSizeKey = localStorage.getItem(KB_STORAGE_SIZE) || 'large';
+
+      if (savedWidth && savedWidth >= 280) {
+        virtualKeyboard.style.width = `${savedWidth}px`;
+        updateKeyboardScale(savedWidth);
+
+        // Identifica se a largura coincide com um dos presets (small, medium, large)
+        let matchedPreset = null;
+        for (const [key, preset] of Object.entries(KB_SIZE_PRESETS)) {
+          if (Math.abs(preset.width - savedWidth) <= 5) {
+            matchedPreset = key;
+            break;
+          }
+        }
+        document.querySelectorAll('.kb-size-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.getAttribute('data-size') === matchedPreset);
+        });
+      } else {
+        applyKbSizePreset(savedSizeKey, false);
+      }
+
+      // 2. Restaurar Posição (X e Y)
       const pos = JSON.parse(localStorage.getItem(KB_STORAGE_POS) || 'null');
-      const sizeKey = localStorage.getItem(KB_STORAGE_SIZE) || 'large';
-      if (pos) {
-        virtualKeyboard.style.left = pos.left + 'px';
-        virtualKeyboard.style.top = pos.top + 'px';
+      if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
+        const maxLeft = Math.max(0, window.innerWidth - 100);
+        const maxTop = Math.max(0, window.innerHeight - 80);
+        const clampedLeft = Math.max(0, Math.min(maxLeft, pos.left));
+        const clampedTop = Math.max(0, Math.min(maxTop, pos.top));
+        virtualKeyboard.style.left = clampedLeft + 'px';
+        virtualKeyboard.style.top = clampedTop + 'px';
         virtualKeyboard.style.bottom = 'auto';
         virtualKeyboard.style.transform = 'none';
       }
-      applyKbSizePreset(sizeKey, false);
     } catch (_) {}
-  }
-
-  function saveKbPosition() {
-    const rect = virtualKeyboard.getBoundingClientRect();
-    localStorage.setItem(KB_STORAGE_POS, JSON.stringify({ left: rect.left, top: rect.top }));
   }
 
   function updateKeyboardScale(width) {
@@ -757,16 +787,26 @@
     document.querySelectorAll('.kb-size-btn').forEach(btn => {
       btn.classList.toggle('active', btn.getAttribute('data-size') === sizeKey);
     });
-    if (saveToStorage) localStorage.setItem(KB_STORAGE_SIZE, sizeKey);
+    if (saveToStorage) {
+      localStorage.setItem(KB_STORAGE_SIZE, sizeKey);
+      localStorage.setItem(KB_STORAGE_WIDTH, preset.width.toString());
+    }
   }
 
   function toggleVirtualKeyboard() {
     const isHidden = virtualKeyboard.classList.toggle('hidden');
-    if (!isHidden) restoreKbPosition();
+    if (!isHidden) {
+      restoreKbState();
+    } else {
+      saveKbState();
+    }
   }
 
   toggleVirtualKbBtn.addEventListener('click', toggleVirtualKeyboard);
-  closeKbBtn.addEventListener('click', () => virtualKeyboard.classList.add('hidden'));
+  closeKbBtn.addEventListener('click', () => {
+    saveKbState();
+    virtualKeyboard.classList.add('hidden');
+  });
 
   // Size Preset Buttons
   document.querySelectorAll('.kb-size-btn').forEach(btn => {
@@ -819,10 +859,18 @@
   });
 
   kbDragHandle.addEventListener('pointerup', () => {
-    if (kbDragState) { kbDragState = null; saveKbPosition(); }
+    if (kbDragState) {
+      kbDragState = null;
+      saveKbState();
+    }
   });
 
-  kbDragHandle.addEventListener('pointercancel', () => { kbDragState = null; });
+  kbDragHandle.addEventListener('pointercancel', () => {
+    if (kbDragState) {
+      kbDragState = null;
+      saveKbState();
+    }
+  });
 
   // --- Resize Logic (corner grip) ---
   let kbResizeState = null;
@@ -846,8 +894,19 @@
     document.querySelectorAll('.kb-size-btn').forEach(btn => btn.classList.remove('active'));
   });
 
-  kbResizeGrip.addEventListener('pointerup', () => { kbResizeState = null; });
-  kbResizeGrip.addEventListener('pointercancel', () => { kbResizeState = null; });
+  kbResizeGrip.addEventListener('pointerup', () => {
+    if (kbResizeState) {
+      kbResizeState = null;
+      saveKbState();
+    }
+  });
+
+  kbResizeGrip.addEventListener('pointercancel', () => {
+    if (kbResizeState) {
+      kbResizeState = null;
+      saveKbState();
+    }
+  });
 
 
   // Caps Lock & Shift
