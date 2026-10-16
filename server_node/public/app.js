@@ -980,6 +980,9 @@
   });
 
   // Tapping bottom swipe bar reveals the exit controls
+  bottomSwipeZone.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+  });
   bottomSwipeZone.addEventListener('click', (e) => {
     e.stopPropagation();
     showExitDock();
