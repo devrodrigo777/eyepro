@@ -44,8 +44,15 @@
   const toggleVirtualKbBtn = document.getElementById('toggleVirtualKbBtn');
   const floatingKbTrigger = document.getElementById('floatingKbTrigger');
   const closeKbBtn = document.getElementById('closeKbBtn');
+  const clearKbTextBtn = document.getElementById('clearKbTextBtn');
   const kbCapsLock = document.getElementById('kbCapsLock');
   const kbShift = document.getElementById('kbShift');
+  const kbDragHandle = document.getElementById('kbDragHandle');
+  const kbResizeGrip = document.getElementById('kbResizeGrip');
+
+  // Quality & Misc Elements
+  const qualityBtn = document.getElementById('qualityBtn');
+  const qualityMenu = document.getElementById('qualityMenu');
 
   // --- State ---
   let ws = null;
@@ -680,14 +687,134 @@
     });
   });
 
-  // ==================== TECLADO VIRTUAL SMART TV & TOUCH ====================
+  // ==================== TECLADO VIRTUAL SMART TV - FLUTUANTE ARRASTÁVEL ====================
+  const KB_SIZE_PRESETS = {
+    small:  { width: 480 },
+    medium: { width: 620 },
+    large:  { width: 760 }
+  };
+  const KB_STORAGE_POS = 'eyepro_kb_pos';
+  const KB_STORAGE_SIZE = 'eyepro_kb_size';
+
+  // Restore last position from localStorage
+  function restoreKbPosition() {
+    try {
+      const pos = JSON.parse(localStorage.getItem(KB_STORAGE_POS) || 'null');
+      const sizeKey = localStorage.getItem(KB_STORAGE_SIZE) || 'large';
+      if (pos) {
+        virtualKeyboard.style.left = pos.left + 'px';
+        virtualKeyboard.style.top = pos.top + 'px';
+        virtualKeyboard.style.bottom = 'auto';
+        virtualKeyboard.style.transform = 'none';
+      }
+      applyKbSizePreset(sizeKey, false);
+    } catch (_) {}
+  }
+
+  function saveKbPosition() {
+    const rect = virtualKeyboard.getBoundingClientRect();
+    localStorage.setItem(KB_STORAGE_POS, JSON.stringify({ left: rect.left, top: rect.top }));
+  }
+
+  function applyKbSizePreset(sizeKey, saveToStorage = true) {
+    const preset = KB_SIZE_PRESETS[sizeKey] || KB_SIZE_PRESETS.large;
+    virtualKeyboard.style.width = preset.width + 'px';
+    // Mark active preset button
+    document.querySelectorAll('.kb-size-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-size') === sizeKey);
+    });
+    if (saveToStorage) localStorage.setItem(KB_STORAGE_SIZE, sizeKey);
+  }
+
   function toggleVirtualKeyboard() {
-    virtualKeyboard.classList.toggle('hidden');
+    const isHidden = virtualKeyboard.classList.toggle('hidden');
+    if (!isHidden) restoreKbPosition();
   }
 
   toggleVirtualKbBtn.addEventListener('click', toggleVirtualKeyboard);
   floatingKbTrigger.addEventListener('click', toggleVirtualKeyboard);
   closeKbBtn.addEventListener('click', () => virtualKeyboard.classList.add('hidden'));
+
+  // Size Preset Buttons
+  document.querySelectorAll('.kb-size-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyKbSizePreset(btn.getAttribute('data-size'));
+    });
+  });
+
+  // Clear keyboard (Ctrl+A then Delete)
+  if (clearKbTextBtn) {
+    clearKbTextBtn.addEventListener('click', () => {
+      sendWorkerEvent({ type: 'special_key', action: 'ctrlc' }); // focus confirmation
+      setTimeout(() => {
+        sendWorkerEvent({ type: 'key_down', key: 'a', code: 'KeyA', ctrlKey: true });
+        setTimeout(() => {
+          sendWorkerEvent({ type: 'key_up', key: 'a', code: 'KeyA' });
+          sendWorkerEvent({ type: 'key_down', key: 'Delete', code: 'Delete' });
+          setTimeout(() => sendWorkerEvent({ type: 'key_up', key: 'Delete', code: 'Delete' }), 30);
+        }, 30);
+      }, 30);
+    });
+  }
+
+  // --- Drag Logic (pointer events) ---
+  let kbDragState = null;
+
+  kbDragHandle.addEventListener('pointerdown', (e) => {
+    if (e.target.tagName === 'BUTTON') return; // Don't drag when clicking buttons
+    e.preventDefault();
+    kbDragHandle.setPointerCapture(e.pointerId);
+    const rect = virtualKeyboard.getBoundingClientRect();
+    // Switch from CSS centering to absolute position
+    virtualKeyboard.style.left = rect.left + 'px';
+    virtualKeyboard.style.top = rect.top + 'px';
+    virtualKeyboard.style.bottom = 'auto';
+    virtualKeyboard.style.transform = 'none';
+    kbDragState = { startX: e.clientX, startY: e.clientY, origLeft: rect.left, origTop: rect.top };
+  });
+
+  kbDragHandle.addEventListener('pointermove', (e) => {
+    if (!kbDragState) return;
+    e.preventDefault();
+    const dx = e.clientX - kbDragState.startX;
+    const dy = e.clientY - kbDragState.startY;
+    const newLeft = Math.max(0, Math.min(window.innerWidth - 100, kbDragState.origLeft + dx));
+    const newTop = Math.max(0, Math.min(window.innerHeight - 60, kbDragState.origTop + dy));
+    virtualKeyboard.style.left = newLeft + 'px';
+    virtualKeyboard.style.top = newTop + 'px';
+  });
+
+  kbDragHandle.addEventListener('pointerup', () => {
+    if (kbDragState) { kbDragState = null; saveKbPosition(); }
+  });
+
+  kbDragHandle.addEventListener('pointercancel', () => { kbDragState = null; });
+
+  // --- Resize Logic (corner grip) ---
+  let kbResizeState = null;
+
+  kbResizeGrip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    kbResizeGrip.setPointerCapture(e.pointerId);
+    const rect = virtualKeyboard.getBoundingClientRect();
+    kbResizeState = { startX: e.clientX, origWidth: rect.width };
+  });
+
+  kbResizeGrip.addEventListener('pointermove', (e) => {
+    if (!kbResizeState) return;
+    e.preventDefault();
+    const dx = e.clientX - kbResizeState.startX;
+    const newWidth = Math.max(320, Math.min(window.innerWidth * 0.98, kbResizeState.origWidth + dx));
+    virtualKeyboard.style.width = newWidth + 'px';
+    // Deactivate all size preset buttons since we're using custom size
+    document.querySelectorAll('.kb-size-btn').forEach(btn => btn.classList.remove('active'));
+  });
+
+  kbResizeGrip.addEventListener('pointerup', () => { kbResizeState = null; });
+  kbResizeGrip.addEventListener('pointercancel', () => { kbResizeState = null; });
+
 
   // Caps Lock & Shift
   kbCapsLock.addEventListener('click', () => {
@@ -871,6 +998,42 @@
       specialKeysBtn.parentElement.classList.remove('open');
     });
   });
+
+  // Quality Dropdown
+  const QUALITY_PRESETS = {
+    low:    { fps: 20, quality: 65, scale: 0.6 },
+    medium: { fps: 25, quality: 75, scale: 0.8 },
+    high:   { fps: 30, quality: 82, scale: 1.0 },
+    ultra:  { fps: 60, quality: 92, scale: 1.0 }
+  };
+
+  if (qualityBtn && qualityMenu) {
+    qualityBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('qualityDropdown').classList.toggle('open');
+    });
+
+    qualityMenu.querySelectorAll('button[data-quality]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = QUALITY_PRESETS[btn.getAttribute('data-quality')];
+        if (preset) {
+          sendWorkerEvent({
+            type: 'set_settings',
+            fps: preset.fps,
+            quality: preset.quality,
+            scale: preset.scale
+          });
+          qualityBtn.textContent = `📶 ${btn.textContent.split(' ').slice(1, 2).join(' ')} ▾`;
+        }
+        document.getElementById('qualityDropdown').classList.remove('open');
+      });
+    });
+
+    window.addEventListener('click', () => {
+      const qd = document.getElementById('qualityDropdown');
+      if (qd) qd.classList.remove('open');
+    });
+  }
 
   // Start app
   initAuth();

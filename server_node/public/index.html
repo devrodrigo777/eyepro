@@ -111,7 +111,18 @@
           </div>
         </div>
 
-        <button class="btn btn-action btn-fullscreen" id="fullscreenBtn" title="Colocar em 100% Tela Cheia sem distrações">⛶ 100% Tela Cheia</button>
+        <button class="btn btn-action btn-fullscreen" id="fullscreenBtn" title="Colocar em 100% Tela Cheia sem distrações">⛶ Tela Cheia</button>
+
+        <div class="dropdown" id="qualityDropdown">
+          <button class="btn btn-action dropdown-btn" id="qualityBtn">📶 Qualidade ▾</button>
+          <div class="dropdown-content" id="qualityMenu">
+            <button data-quality="low">🔵 Baixa (20fps · 65%)</button>
+            <button data-quality="medium">🟡 Média (25fps · 75%)</button>
+            <button data-quality="high">🟠 Alta (30fps · 82%)</button>
+            <button data-quality="ultra">🔴 Ultra (60fps · 92%)</button>
+          </div>
+        </div>
+
         <button class="btn btn-danger btn-logout" id="logoutBtn" title="Sair da sessão">Sair</button>
       </div>
     </header>
@@ -163,13 +174,18 @@
       ⌨️ Teclado TV
     </button>
 
-    <!-- ==================== TECLADO VIRTUAL PARA SMART TV & TOUCH ==================== -->
+    <!-- ==================== TECLADO VIRTUAL FLUTUANTE ARRASTÁVEL ==================== -->
     <div class="virtual-keyboard-dock hidden" id="virtualKeyboard">
-      <div class="kb-header">
-        <span class="kb-title">⌨️ Teclado Touch Smart TV</span>
+      <!-- Drag Handle -->
+      <div class="kb-drag-handle" id="kbDragHandle">
+        <span class="kb-drag-icon">⠿</span>
+        <span class="kb-title">⌨️ Teclado TV</span>
         <div class="kb-header-actions">
-          <button class="btn btn-sm btn-secondary" id="clearKbTextBtn">Limpar</button>
-          <button class="btn btn-sm btn-primary" id="closeKbBtn">Fechar ✕</button>
+          <button class="kb-size-btn" data-size="small" title="Pequeno">S</button>
+          <button class="kb-size-btn" data-size="medium" title="Médio">M</button>
+          <button class="kb-size-btn active" data-size="large" title="Grande">G</button>
+          <button class="btn btn-sm btn-secondary" id="clearKbTextBtn">⌦</button>
+          <button class="btn btn-sm btn-danger" id="closeKbBtn">✕</button>
         </div>
       </div>
 
@@ -252,9 +268,11 @@
           <button class="kb-key kb-arrow" data-key="ArrowLeft">◄</button>
           <button class="kb-key kb-arrow" data-key="ArrowDown">▼</button>
           <button class="kb-key kb-arrow" data-key="ArrowRight">►</button>
-          <button class="kb-key kb-space" data-key=" ">BARRA DE ESPAÇO</button>
+          <button class="kb-key kb-space" data-key=" ">ESPAÇO</button>
         </div>
       </div>
+      <!-- Resize Grip (bottom-right corner) -->
+      <div class="kb-resize-grip" id="kbResizeGrip" title="Redimensionar">⤡</div>
     </div>
 
     <!-- ==================== MODAL CENTRAL: SELEÇÃO DE WORKERS ==================== -->

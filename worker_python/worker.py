@@ -142,9 +142,9 @@ class RemoteScreenWorker:
     def __init__(self, relay_url: str, auth_key: str = ""):
         self.relay_url = relay_url
         self.auth_key = auth_key
-        self.target_fps = 25
-        self.jpeg_quality = 65
-        self.scale = 0.75  # 75% resolution scale for balanced bandwidth & latency
+        self.target_fps = 30
+        self.jpeg_quality = 82
+        self.scale = 1.0  # Full resolution by default for best quality
         self.zoom_wheel_remainder = 0.0
         self.running = True
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
